@@ -1,0 +1,41 @@
+# LibSpace Backend - Python Dependencies
+# For Raspberry Pi 4 with Camera Module
+# Python 3.13 compatible versions
+
+# FastAPI and server
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+pydantic>=2.10.0
+pydantic-settings>=2.6.0
+python-multipart>=0.0.20
+
+# Computer Vision
+opencv-python>=4.10.0
+opencv-contrib-python>=4.10.0
+ultralytics>=8.3.0  # YOLOv8 (Python 3.13 support from 8.3.0+)
+torch>=2.6.0  # PyTorch for YOLO (Python 3.13 support)
+torchvision>=0.21.0
+numpy>=1.26.0
+pillow>=11.0.0
+
+# Raspberry Pi Camera
+picamera2>=0.3.16
+# libcamera (system package - install via apt)
+
+# Utilities
+python-dotenv==1.0.0
+aiofiles==23.2.1
+
+# Optional: Database support (uncomment if needed)
+# sqlalchemy==2.0.23
+# databases==0.8.0
+
+# Optional: Redis for caching (uncomment if needed)
+# redis==5.0.1
+# aioredis==2.0.1
+
+# Development tools (optional)
+# pytest==7.4.3
+# pytest-asyncio==0.21.1
+# black==23.11.0
+# flake8==6.1.0

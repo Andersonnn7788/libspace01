@@ -1,0 +1,7 @@
+# Model files directory
+# Place your YOLO model files here (.pt format)
+
+# Download models:
+# YOLOv8 Nano (fastest): wget https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n.pt
+# YOLOv8 Small: wget https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8s.pt
+# YOLOv8 Medium: wget https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8m.pt
