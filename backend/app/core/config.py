@@ -30,15 +30,22 @@ class Settings(BaseSettings):
     
     # YOLO model settings
     MODEL_PATH: str = "models/yolov8n.pt"  # or yolov5s.pt, yolov8s.pt
-    CONFIDENCE_THRESHOLD: float = 0.5
-    IOU_THRESHOLD: float = 0.45
-    
+    CONFIDENCE_THRESHOLD: float = 0.5  # General confidence threshold for detections
+    IOU_THRESHOLD: float = 0.45  # Non-max suppression threshold
+
     # Detection settings
     DETECTION_INTERVAL: float = 2.0  # seconds between detections
-    TARGET_CLASS: str = "person"  # YOLO class to detect (chairs/persons)
-    
-    # Seat configuration
-    TOTAL_SEATS: int = 50  # Update based on your library
+    TARGET_CLASSES: List[str] = ["chair", "person"]  # YOLO classes to detect
+    DETECT_CHAIRS: bool = True  # Enable chair/seat detection
+    DETECT_PERSONS: bool = True  # Enable person detection
+
+    # Chair-specific detection settings
+    CHAIR_CONFIDENCE_THRESHOLD: float = 0.4  # Confidence threshold for chair detection
+    PERSON_CONFIDENCE_THRESHOLD: float = 0.5  # Confidence threshold for person detection
+    OCCUPANCY_IOU_THRESHOLD: float = 0.3  # Minimum overlap to consider a chair occupied
+
+    # Seat configuration (DEPRECATED - will be dynamically detected)
+    TOTAL_SEATS: int = 50  # This is now ignored; seats are detected dynamically
     SEAT_ZONES: List[dict] = [
         {"name": "Zone A", "seats": 20},
         {"name": "Zone B", "seats": 15},

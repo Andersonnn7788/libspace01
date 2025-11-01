@@ -38,6 +38,15 @@ class SeatInfo(BaseModel):
     last_updated: datetime
 
 
+class Seat(BaseModel):
+    """Detected seat/chair with occupancy information"""
+    seat_id: int
+    bbox: BoundingBox
+    is_occupied: bool
+    confidence: float
+    person_detection: Optional[Detection] = None
+
+
 class SeatAvailability(BaseModel):
     """Current seat availability summary"""
     total_seats: int
@@ -46,6 +55,7 @@ class SeatAvailability(BaseModel):
     occupancy_rate: float = Field(..., ge=0, le=100)
     last_updated: datetime
     detections: List[Detection] = []
+    seats: List[Seat] = []  # List of detected seats with occupancy status
 
     @computed_field
     @property

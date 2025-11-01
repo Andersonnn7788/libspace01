@@ -13,7 +13,7 @@ from typing import Optional, List
 from pathlib import Path
 
 from app.core.config import settings
-from app.models.schemas import Detection, SeatAvailability
+from app.models.schemas import Detection, SeatAvailability, Seat
 from app.services.detection_service import DetectionService
 
 logger = logging.getLogger(__name__)
@@ -39,9 +39,10 @@ class CameraService:
         self.current_frame: Optional[np.ndarray] = None
         self.annotated_frame: Optional[np.ndarray] = None
         self.last_frame_time: Optional[datetime] = None
-        
+
         # Detection storage
         self.current_detections: List[Detection] = []
+        self.current_seats: List[Seat] = []
         self.current_availability: Optional[SeatAvailability] = None
         
         # Camera settings
@@ -58,20 +59,20 @@ class CameraService:
         try:
             logger.info("Initializing Raspberry Pi Camera...")
             self.camera = Picamera2()
-            
+
             # Configure camera
             config = self.camera.create_preview_configuration(
                 main={"size": (self.width, self.height), "format": "RGB888"}
             )
             self.camera.configure(config)
-            
+
             # Apply rotation if needed
             if settings.CAMERA_ROTATION:
                 # Rotation is handled in post-processing
                 pass
-            
+
             logger.info(f"Camera configured: {self.width}x{self.height} @ {self.fps} FPS")
-            
+
         except Exception as e:
             logger.error(f"Failed to initialize camera: {e}")
             logger.warning("Camera will use fallback mode")
@@ -156,23 +157,27 @@ class CameraService:
     def _process_detection(self, frame: np.ndarray):
         """Process detection on frame"""
         try:
-            # Run detection
-            detections = self.detection_service.detect(frame)
-            
-            # Calculate occupancy
-            occupied, available, rate = self.detection_service.calculate_occupancy(detections)
-            
-            # Create annotated frame
-            annotated = self.detection_service.annotate_frame(frame, detections)
-            
+            # Run detection for both chairs and persons
+            chair_detections, person_detections = self.detection_service.detect(frame)
+
+            # Match persons to chairs
+            seats = self.detection_service.match_persons_to_chairs(chair_detections, person_detections)
+
+            # Calculate occupancy based on detected seats
+            occupied, available, rate = self.detection_service.calculate_occupancy(seats)
+
+            # Create annotated frame with seats
+            annotated = self.detection_service.annotate_frame(frame, seats)
+
             # Add statistics overlay
+            total_seats = len(seats)
             stats_text = [
-                f"Total Seats: {settings.TOTAL_SEATS}",
+                f"Total Seats: {total_seats} (detected)",
                 f"Occupied: {occupied}",
                 f"Available: {available}",
                 f"Occupancy: {rate:.1f}%"
             ]
-            
+
             y_offset = 30
             for text in stats_text:
                 cv2.putText(
@@ -185,24 +190,29 @@ class CameraService:
                     2
                 )
                 y_offset += 30
-            
+
+            # Combine all detections for backward compatibility
+            all_detections = chair_detections + person_detections
+
             # Update stored data
             with self.lock:
-                self.current_detections = detections
+                self.current_detections = all_detections
+                self.current_seats = seats
                 self.annotated_frame = annotated
                 self.current_availability = SeatAvailability(
-                    total_seats=settings.TOTAL_SEATS,
+                    total_seats=total_seats,
                     occupied_seats=occupied,
                     available_seats=available,
                     occupancy_rate=rate,
                     last_updated=datetime.now(),
-                    detections=detections
+                    detections=all_detections,
+                    seats=seats
                 )
-            
+
             # Save detection image if enabled
             if settings.SAVE_DETECTIONS:
                 self._save_detection(annotated)
-                
+
         except Exception as e:
             logger.error(f"Detection processing error: {e}")
     
@@ -239,7 +249,12 @@ class CameraService:
         """Get current detections"""
         with self.lock:
             return self.current_detections.copy()
-    
+
+    def get_current_seats(self) -> List[Seat]:
+        """Get current detected seats with occupancy info"""
+        with self.lock:
+            return self.current_seats.copy()
+
     def is_running(self) -> bool:
         """Check if camera is running"""
         return self.running
