@@ -44,27 +44,36 @@ async def get_snapshot(
 ):
     """
     Get a single snapshot from the camera
-    
+
     Args:
         annotated: If True, returns annotated frame with detections
     """
     try:
         if not camera_service.is_running():
             raise HTTPException(status_code=503, detail="Camera is not running")
-        
-        if annotated:
-            frame = camera_service.get_annotated_frame()
+
+        # Try to get pre-encoded frame first (faster)
+        encoded_frame = camera_service.get_encoded_frame(annotated=annotated)
+
+        if encoded_frame is not None:
+            # Use pre-encoded frame
+            content = encoded_frame
         else:
-            frame = camera_service.get_current_frame()
-        
-        if frame is None:
-            raise HTTPException(status_code=503, detail="No frame available")
-        
-        # Encode frame to JPEG
-        _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
-        
+            # Fallback to encoding on-demand if pre-encoded not available yet
+            if annotated:
+                frame = camera_service.get_annotated_frame()
+            else:
+                frame = camera_service.get_current_frame()
+
+            if frame is None:
+                raise HTTPException(status_code=503, detail="No frame available")
+
+            # Encode frame to JPEG
+            _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+            content = buffer.tobytes()
+
         return Response(
-            content=buffer.tobytes(),
+            content=content,
             media_type="image/jpeg",
             headers={
                 "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -72,7 +81,7 @@ async def get_snapshot(
                 "Expires": "0"
             }
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -86,39 +95,40 @@ async def get_video_stream(
     camera_service: CameraService = Depends(get_camera_service)
 ):
     """
-    Get MJPEG video stream
-    
+    Get MJPEG video stream with optimized latency
+
     Args:
         annotated: If True, returns annotated stream with detections
     """
-    def generate():
-        """Generate MJPEG stream"""
+    async def generate():
+        """Generate MJPEG stream using pre-encoded frames"""
+        import asyncio
+
+        frame_interval = 1.0 / settings.CAMERA_FPS
+        last_encoded_frame = None
+
         try:
             while camera_service.is_running():
-                if annotated:
-                    frame = camera_service.get_annotated_frame()
-                else:
-                    frame = camera_service.get_current_frame()
-                
-                if frame is not None:
-                    # Encode frame
-                    _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
-                    
+                # Get pre-encoded frame (much faster than encoding on-demand)
+                encoded_frame = camera_service.get_encoded_frame(annotated=annotated)
+
+                # Only send if we have a new frame (avoid sending duplicates)
+                if encoded_frame is not None and encoded_frame != last_encoded_frame:
                     # Yield frame in MJPEG format
                     yield (b'--frame\r\n'
-                           b'Content-Type: image/jpeg\r\n\r\n' + 
-                           buffer.tobytes() + b'\r\n')
-                
-                # Small delay to control stream rate
-                import time
-                time.sleep(1 / settings.CAMERA_FPS)
-                
+                           b'Content-Type: image/jpeg\r\n\r\n' +
+                           encoded_frame + b'\r\n')
+                    last_encoded_frame = encoded_frame
+
+                # Use asyncio sleep for better async performance
+                await asyncio.sleep(frame_interval)
+
         except Exception as e:
             logger.error(f"Stream error: {e}")
-    
+
     if not camera_service.is_running():
         raise HTTPException(status_code=503, detail="Camera is not running")
-    
+
     return StreamingResponse(
         generate(),
         media_type="multipart/x-mixed-replace; boundary=frame"

@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     IOU_THRESHOLD: float = 0.45  # Non-max suppression threshold
 
     # Detection settings
-    DETECTION_INTERVAL: float = 2.0  # seconds between detections
+    DETECTION_INTERVAL: float = 3.5  # seconds between detections (optimized for latency)
     TARGET_CLASSES: List[str] = ["chair", "person"]  # YOLO classes to detect
     DETECT_CHAIRS: bool = True  # Enable chair/seat detection
     DETECT_PERSONS: bool = True  # Enable person detection
