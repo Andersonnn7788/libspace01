@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     CAMERA_ROTATION: int = 0  # 0, 90, 180, 270
     
     # YOLO model settings
-    MODEL_PATH: str = "models/yolov11n.pt"  # YOLOv11 nano model (improved accuracy)
+    MODEL_PATH: str = "models/yolov8n.pt"  # YOLOv8 nano model
     CONFIDENCE_THRESHOLD: float = 0.5  # General confidence threshold for detections
     IOU_THRESHOLD: float = 0.45  # Non-max suppression threshold
 
