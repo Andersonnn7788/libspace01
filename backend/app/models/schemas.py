@@ -11,6 +11,7 @@ class SeatStatus(str, Enum):
     """Seat status enumeration"""
     AVAILABLE = "available"
     OCCUPIED = "occupied"
+    HOGGED = "hogged"  # Seat occupied by objects without a person
     UNKNOWN = "unknown"
 
 
@@ -43,14 +44,17 @@ class Seat(BaseModel):
     seat_id: int
     bbox: BoundingBox
     is_occupied: bool
+    is_hogged: bool = False  # True if occupied by objects without a person
     confidence: float
     person_detection: Optional[Detection] = None
+    hogging_objects: Optional[List[Detection]] = None  # Objects occupying the seat
 
 
 class SeatAvailability(BaseModel):
     """Current seat availability summary"""
     total_seats: int
     occupied_seats: int
+    hogged_seats: int = 0  # Seats occupied by objects without a person
     available_seats: int
     occupancy_rate: float = Field(..., ge=0, le=100)
     last_updated: datetime

@@ -3,6 +3,7 @@
 export interface SeatAvailability {
   available_seats: number;
   occupied_seats: number;
+  hogged_seats: number;
   total_seats: number;
   occupancy_rate: number;
   last_updated: string;
