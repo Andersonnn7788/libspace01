@@ -234,8 +234,8 @@ class DetectionService:
                 # Check vertical alignment (person should be above or slightly overlapping chair)
                 # If person's bottom is between chair's top and bottom (or slightly below), it's likely seated
                 vertical_tolerance = chair.bbox.y2 - chair.bbox.y1  # Chair height as tolerance
-                vertical_ok = (person_bottom_y >= chair_top_y - vertical_tolerance * 0.3 and
-                              person_top_y <= chair_bottom_y + vertical_tolerance * 0.3)
+                vertical_ok = (person_bottom_y >= chair_top_y - vertical_tolerance * 0.15 and
+                              person_top_y <= chair_bottom_y + vertical_tolerance * 0.15)
 
                 # Calculate composite score: Use proximity if vertical alignment is good
                 if vertical_ok:
@@ -247,8 +247,8 @@ class DetectionService:
                     # Fall back to pure IoU
                     composite_score = iou
 
-                # Use very low threshold - if we detect vertical alignment, that's good enough
-                min_threshold = 0.10
+                # Use higher threshold to reduce false positives from nearby persons
+                min_threshold = 0.25
 
                 if composite_score >= min_threshold and composite_score > max_score:
                     max_score = composite_score
@@ -266,7 +266,8 @@ class DetectionService:
                 bbox=chair.bbox,
                 is_occupied=is_occupied,
                 confidence=chair.confidence,
-                person_detection=matched_person if is_occupied else None
+                person_detection=matched_person if is_occupied else None,
+                person_match_score=max_score  # Store person match confidence
             )
             seats.append(seat)
 
@@ -279,8 +280,8 @@ class DetectionService:
         object_detections: List[Detection]
     ) -> List[Seat]:
         """
-        Match object detections to chairs to identify hogged seats (objects without persons)
-        A seat is marked as hogged if it has objects but no person
+        Match object detections to chairs to identify hogged seats
+        Stores object match scores for priority comparison with person matches
 
         Args:
             seats: List of Seat objects (already matched with persons)
@@ -290,13 +291,11 @@ class DetectionService:
             Updated list of Seat objects with hogging information
         """
         for seat in seats:
-            # Only check for hogging if seat is NOT occupied by a person
-            if seat.is_occupied:
-                continue
-
             matched_objects = []
+            max_object_score = 0.0
 
-            # Find all objects that overlap with this chair
+            # Check all chairs for objects (not just unoccupied ones)
+            # This allows us to detect when objects are more prominent than persons
             for obj in object_detections:
                 # Calculate IoU for overlap
                 iou = self.calculate_iou(seat.bbox, obj.bbox)
@@ -326,8 +325,12 @@ class DetectionService:
 
                 if composite_score >= min_threshold:
                     matched_objects.append(obj)
+                    max_object_score = max(max_object_score, composite_score)
 
-            # Mark seat as hogged if it has objects but no person
+            # Store object match score regardless of whether seat is occupied
+            seat.object_match_score = max_object_score
+
+            # Temporarily mark as hogged if objects found (will be refined in priority logic)
             if matched_objects:
                 seat.is_hogged = True
                 seat.hogging_objects = matched_objects
@@ -336,7 +339,59 @@ class DetectionService:
                 seat.hogging_objects = None
 
         hogged_count = len([s for s in seats if s.is_hogged])
-        logger.info(f"Detected {hogged_count} hogged seats (objects without persons)")
+        logger.info(f"Detected {hogged_count} potential hogged seats (before priority scoring)")
+        return seats
+
+    def apply_priority_scoring(self, seats: List[Seat]) -> List[Seat]:
+        """
+        Apply priority scoring to determine final seat status
+        Compares person_match_score vs object_match_score to handle conflicts
+
+        Logic:
+        - If person score >= threshold (0.25): Mark as "Occupied" (person present, even with belongings)
+        - Else if object score > 0 and person score < threshold: Mark as "Hogged" (only objects, no person)
+        - Otherwise: Mark as "Empty"
+
+        This ensures that when someone is sitting with their laptop/backpack, it's "Occupied" not "Hogged"
+
+        Args:
+            seats: List of Seat objects with both person and object match scores
+
+        Returns:
+            Updated list of Seat objects with final status
+        """
+        PERSON_THRESHOLD = 0.25  # Must match the threshold in match_persons_to_chairs
+
+        for seat in seats:
+            # Get match scores
+            person_score = seat.person_match_score
+            object_score = seat.object_match_score
+
+            # Apply priority logic: Person presence takes priority
+            if person_score >= PERSON_THRESHOLD:
+                # Person is truly sitting - mark as occupied (even if they have belongings)
+                seat.is_occupied = True
+                seat.is_hogged = False
+                seat.hogging_objects = None  # Clear hogging objects
+                logger.debug(f"Seat {seat.seat_id}: Occupied (person:{person_score:.2f} >= threshold, object:{object_score:.2f})")
+            elif object_score > 0 and person_score < PERSON_THRESHOLD:
+                # Only objects detected, no real person match - mark as hogged
+                seat.is_occupied = False
+                seat.is_hogged = True
+                seat.person_detection = None  # Clear person detection
+                logger.debug(f"Seat {seat.seat_id}: Hogged (object:{object_score:.2f}, person:{person_score:.2f} < threshold)")
+            else:
+                # Nothing detected - mark as empty
+                seat.is_occupied = False
+                seat.is_hogged = False
+                seat.person_detection = None
+                seat.hogging_objects = None
+                logger.debug(f"Seat {seat.seat_id}: Empty (person:{person_score:.2f}, object:{object_score:.2f})")
+
+        occupied_count = len([s for s in seats if s.is_occupied])
+        hogged_count = len([s for s in seats if s.is_hogged])
+        empty_count = len([s for s in seats if not s.is_occupied and not s.is_hogged])
+        logger.info(f"After priority scoring: {occupied_count} occupied, {hogged_count} hogged, {empty_count} empty")
         return seats
 
     def annotate_frame(self, frame: np.ndarray, seats: List[Seat]) -> np.ndarray:

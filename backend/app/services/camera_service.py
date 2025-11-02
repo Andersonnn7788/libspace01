@@ -249,6 +249,9 @@ class CameraService:
             # Match objects to chairs to identify hogged seats
             seats = self.detection_service.match_objects_to_chairs(seats, object_detections)
 
+            # Apply priority scoring to determine final status (person vs object)
+            seats = self.detection_service.apply_priority_scoring(seats)
+
             # Calculate occupancy based on detected seats (including hogged seats)
             occupied, hogged, available, rate = self.detection_service.calculate_occupancy(seats)
 

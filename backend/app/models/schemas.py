@@ -48,6 +48,8 @@ class Seat(BaseModel):
     confidence: float
     person_detection: Optional[Detection] = None
     hogging_objects: Optional[List[Detection]] = None  # Objects occupying the seat
+    person_match_score: float = 0.0  # Confidence score for person-chair match
+    object_match_score: float = 0.0  # Confidence score for object-chair match
 
 
 class SeatAvailability(BaseModel):
