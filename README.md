@@ -8,7 +8,7 @@ LibSpace is a comprehensive solution for monitoring and displaying real-time sea
 
 ## 🏗️ Architecture
 
-### Backend (Raspberry Pi 4) ✅ **FULLY IMPLEMENTED**
+### Backend (Raspberry Pi 4)
 - **Hardware**: Raspberry Pi 4, Pi Camera Module v1
 - **Framework**: FastAPI (Python) with async support
 - **Computer Vision**: OpenCV + YOLOv8 (Ultralytics)
@@ -23,7 +23,7 @@ LibSpace is a comprehensive solution for monitoring and displaying real-time sea
   - 🎨 **Color-coded visualization** - Red (occupied), Orange (hogged), Green (available)
   - ⚡ **Performance optimized** - Frame rate control, threaded processing, lock optimization
 
-### Frontend (Next.js Web App) ✅ **FULLY IMPLEMENTED**
+### Frontend (Next.js Web App)
 - **Framework**: Next.js 14+ (React) with TypeScript
 - **Styling**: Tailwind CSS
 - **Features**:
