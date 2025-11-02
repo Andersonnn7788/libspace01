@@ -4,7 +4,7 @@ Real-time library seat availability monitoring system using Advanced Computer Vi
 
 ## 🎯 Project Overview
 
-LibSpace is a comprehensive solution for monitoring and displaying real-time seat availability in university libraries. The system uses a Raspberry Pi 4 with a camera module to detect occupied seats using YOLOv8/YOLOv11 object detection with intelligent chair-person matching and seat hogging detection, providing a modern Next.js web interface for students to check seat availability before visiting the library.
+LibSpace is a comprehensive solution for monitoring and displaying real-time seat availability in university libraries. The system uses a Raspberry Pi 4 with a camera module to detect occupied seats using YOLOv8 object detection with intelligent chair-person matching and seat hogging detection, providing a modern Next.js web interface for students to check seat availability before visiting the library.
 
 ## 🏗️ Architecture
 
