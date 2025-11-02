@@ -39,9 +39,17 @@ class Settings(BaseSettings):
     DETECT_CHAIRS: bool = True  # Enable chair/seat detection
     DETECT_PERSONS: bool = True  # Enable person detection
 
+    # Object detection for seat hogging
+    DETECT_OBJECTS: bool = True  # Enable object detection for seat hogging
+    OBJECT_CLASSES: List[str] = [
+        "backpack", "laptop", "book", "handbag",
+        "suitcase", "bottle", "cup", "cell phone"
+    ]  # Objects that can hog seats
+
     # Chair-specific detection settings
     CHAIR_CONFIDENCE_THRESHOLD: float = 0.4  # Confidence threshold for chair detection
     PERSON_CONFIDENCE_THRESHOLD: float = 0.5  # Confidence threshold for person detection
+    OBJECT_CONFIDENCE_THRESHOLD: float = 0.3  # Confidence threshold for object detection
     OCCUPANCY_IOU_THRESHOLD: float = 0.3  # Minimum overlap to consider a chair occupied
 
     # Seat configuration (DEPRECATED - will be dynamically detected)

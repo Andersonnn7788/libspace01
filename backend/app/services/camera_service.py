@@ -240,42 +240,26 @@ class CameraService:
     def _process_detection(self, frame: np.ndarray):
         """Process detection on frame"""
         try:
-            # Run detection for both chairs and persons
-            chair_detections, person_detections = self.detection_service.detect(frame)
+            # Run detection for chairs, persons, and objects
+            chair_detections, person_detections, object_detections = self.detection_service.detect(frame)
 
             # Match persons to chairs
             seats = self.detection_service.match_persons_to_chairs(chair_detections, person_detections)
 
-            # Calculate occupancy based on detected seats
-            occupied, available, rate = self.detection_service.calculate_occupancy(seats)
+            # Match objects to chairs to identify hogged seats
+            seats = self.detection_service.match_objects_to_chairs(seats, object_detections)
+
+            # Calculate occupancy based on detected seats (including hogged seats)
+            occupied, hogged, available, rate = self.detection_service.calculate_occupancy(seats)
 
             # Create annotated frame with seats
             annotated = self.detection_service.annotate_frame(frame, seats)
 
-            # Add statistics overlay
+            # Statistics are displayed in the web interface, no overlay needed on frame
             total_seats = len(seats)
-            stats_text = [
-                f"Total Seats: {total_seats} (detected)",
-                f"Occupied: {occupied}",
-                f"Available: {available}",
-                f"Occupancy: {rate:.1f}%"
-            ]
-
-            y_offset = 30
-            for text in stats_text:
-                cv2.putText(
-                    annotated,
-                    text,
-                    (10, y_offset),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.7,
-                    (255, 255, 255),
-                    2
-                )
-                y_offset += 30
 
             # Combine all detections for backward compatibility
-            all_detections = chair_detections + person_detections
+            all_detections = chair_detections + person_detections + object_detections
 
             # Update detection data
             with self.detection_lock:
@@ -284,6 +268,7 @@ class CameraService:
                 self.current_availability = SeatAvailability(
                     total_seats=total_seats,
                     occupied_seats=occupied,
+                    hogged_seats=hogged,
                     available_seats=available,
                     occupancy_rate=rate,
                     last_updated=datetime.now(),

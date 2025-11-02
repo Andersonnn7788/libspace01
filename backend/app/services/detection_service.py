@@ -26,8 +26,11 @@ class DetectionService:
         self.target_classes = settings.TARGET_CLASSES
         self.detect_chairs = settings.DETECT_CHAIRS
         self.detect_persons = settings.DETECT_PERSONS
+        self.detect_objects = settings.DETECT_OBJECTS
+        self.object_classes = settings.OBJECT_CLASSES
         self.chair_confidence_threshold = settings.CHAIR_CONFIDENCE_THRESHOLD
         self.person_confidence_threshold = settings.PERSON_CONFIDENCE_THRESHOLD
+        self.object_confidence_threshold = settings.OBJECT_CONFIDENCE_THRESHOLD
         self.occupancy_iou_threshold = settings.OCCUPANCY_IOU_THRESHOLD
 
         # Load YOLO model
@@ -46,27 +49,33 @@ class DetectionService:
                 logger.error(f"Failed to load default model: {e2}")
                 raise
     
-    def detect(self, frame: np.ndarray) -> Tuple[List[Detection], List[Detection]]:
+    def detect(self, frame: np.ndarray) -> Tuple[List[Detection], List[Detection], List[Detection]]:
         """
-        Perform detection on a frame, detecting both chairs and persons
+        Perform detection on a frame, detecting chairs, persons, and objects
 
         Args:
             frame: Input image frame (numpy array)
 
         Returns:
-            Tuple of (chair_detections, person_detections)
+            Tuple of (chair_detections, person_detections, object_detections)
         """
         try:
-            # Run YOLO inference with lower confidence threshold to catch both classes
+            # Run YOLO inference with lowest confidence threshold to catch all classes
+            min_threshold = min(
+                self.chair_confidence_threshold,
+                self.person_confidence_threshold,
+                self.object_confidence_threshold
+            )
             results = self.model.predict(
                 frame,
-                conf=min(self.chair_confidence_threshold, self.person_confidence_threshold),
+                conf=min_threshold,
                 iou=self.iou_threshold,
                 verbose=False
             )
 
             chair_detections = []
             person_detections = []
+            object_detections = []
 
             # Process results
             for result in results:
@@ -116,12 +125,31 @@ class DetectionService:
                             )
                             person_detections.append(detection)
 
-            logger.info(f"Detected {len(chair_detections)} chairs and {len(person_detections)} persons")
-            return chair_detections, person_detections
+                    elif self.detect_objects and class_name.lower() in [obj.lower() for obj in self.object_classes]:
+                        if confidence >= self.object_confidence_threshold:
+                            # Get bounding box coordinates
+                            x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+
+                            # Create detection object
+                            detection = Detection(
+                                class_name=class_name,
+                                confidence=confidence,
+                                bbox=BoundingBox(
+                                    x1=int(x1),
+                                    y1=int(y1),
+                                    x2=int(x2),
+                                    y2=int(y2),
+                                    confidence=confidence
+                                )
+                            )
+                            object_detections.append(detection)
+
+            logger.info(f"Detected {len(chair_detections)} chairs, {len(person_detections)} persons, and {len(object_detections)} objects")
+            return chair_detections, person_detections, object_detections
 
         except Exception as e:
             logger.error(f"Detection error: {e}")
-            return [], []
+            return [], [], []
 
     def calculate_iou(self, bbox1: BoundingBox, bbox2: BoundingBox) -> float:
         """
@@ -245,6 +273,72 @@ class DetectionService:
         logger.info(f"Matched {len([s for s in seats if s.is_occupied])} occupied seats out of {len(seats)} total seats")
         return seats
 
+    def match_objects_to_chairs(
+        self,
+        seats: List[Seat],
+        object_detections: List[Detection]
+    ) -> List[Seat]:
+        """
+        Match object detections to chairs to identify hogged seats (objects without persons)
+        A seat is marked as hogged if it has objects but no person
+
+        Args:
+            seats: List of Seat objects (already matched with persons)
+            object_detections: List of detected objects
+
+        Returns:
+            Updated list of Seat objects with hogging information
+        """
+        for seat in seats:
+            # Only check for hogging if seat is NOT occupied by a person
+            if seat.is_occupied:
+                continue
+
+            matched_objects = []
+
+            # Find all objects that overlap with this chair
+            for obj in object_detections:
+                # Calculate IoU for overlap
+                iou = self.calculate_iou(seat.bbox, obj.bbox)
+
+                # Calculate spatial proximity (similar to person matching)
+                chair_center_x = (seat.bbox.x1 + seat.bbox.x2) / 2
+                chair_center_y = (seat.bbox.y1 + seat.bbox.y2) / 2
+                chair_width = seat.bbox.x2 - seat.bbox.x1
+                chair_height = seat.bbox.y2 - seat.bbox.y1
+
+                obj_center_x = (obj.bbox.x1 + obj.bbox.x2) / 2
+                obj_center_y = (obj.bbox.y1 + obj.bbox.y2) / 2
+
+                # Check if object center is near chair center
+                horizontal_distance = abs(obj_center_x - chair_center_x)
+                vertical_distance = abs(obj_center_y - chair_center_y)
+
+                horizontal_proximity = max(0, 1 - (horizontal_distance / chair_width))
+                vertical_proximity = max(0, 1 - (vertical_distance / chair_height))
+
+                # Calculate composite score
+                proximity_score = (horizontal_proximity + vertical_proximity) / 2
+                composite_score = iou * 0.3 + proximity_score * 0.7
+
+                # Lower threshold for objects since they might be smaller
+                min_threshold = 0.15
+
+                if composite_score >= min_threshold:
+                    matched_objects.append(obj)
+
+            # Mark seat as hogged if it has objects but no person
+            if matched_objects:
+                seat.is_hogged = True
+                seat.hogging_objects = matched_objects
+            else:
+                seat.is_hogged = False
+                seat.hogging_objects = None
+
+        hogged_count = len([s for s in seats if s.is_hogged])
+        logger.info(f"Detected {hogged_count} hogged seats (objects without persons)")
+        return seats
+
     def annotate_frame(self, frame: np.ndarray, seats: List[Seat]) -> np.ndarray:
         """
         Draw bounding boxes and labels on frame showing chairs and occupancy
@@ -262,8 +356,13 @@ class DetectionService:
             bbox = seat.bbox
 
             # Choose color based on occupancy status
-            # Red for occupied, Green for available
-            color = (0, 0, 255) if seat.is_occupied else (0, 255, 0)
+            # Red for person-occupied, Orange for hogged, Green for available
+            if seat.is_occupied:
+                color = (0, 0, 255)  # Red for occupied
+            elif seat.is_hogged:
+                color = (0, 165, 255)  # Orange for hogged
+            else:
+                color = (0, 255, 0)  # Green for available
 
             # Draw chair bounding box
             cv2.rectangle(
@@ -275,20 +374,25 @@ class DetectionService:
             )
 
             # Draw label for chair
-            status = "Occupied" if seat.is_occupied else "Empty"
+            if seat.is_occupied:
+                status = "Occupied"
+            elif seat.is_hogged:
+                status = "Hogged"
+            else:
+                status = "Empty"
             label = f"Chair {seat.seat_id}: {status}"
             (label_w, label_h), _ = cv2.getTextSize(
                 label,
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
-                1
+                0.8,
+                2
             )
 
             # Background for label
             cv2.rectangle(
                 annotated,
-                (bbox.x1, bbox.y1 - label_h - 10),
-                (bbox.x1 + label_w, bbox.y1),
+                (bbox.x1, bbox.y1 - label_h - 15),
+                (bbox.x1 + label_w + 5, bbox.y1),
                 color,
                 -1
             )
@@ -297,11 +401,11 @@ class DetectionService:
             cv2.putText(
                 annotated,
                 label,
-                (bbox.x1, bbox.y1 - 5),
+                (bbox.x1 + 2, bbox.y1 - 7),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
+                0.8,
                 (255, 255, 255),
-                1
+                2
             )
 
             # If occupied, also draw the person bounding box
@@ -322,15 +426,15 @@ class DetectionService:
                 (p_label_w, p_label_h), _ = cv2.getTextSize(
                     person_label,
                     cv2.FONT_HERSHEY_SIMPLEX,
-                    0.5,
-                    1
+                    0.7,
+                    2
                 )
 
                 # Background for person label
                 cv2.rectangle(
                     annotated,
-                    (person_bbox.x1, person_bbox.y1 - p_label_h - 10),
-                    (person_bbox.x1 + p_label_w, person_bbox.y1),
+                    (person_bbox.x1, person_bbox.y1 - p_label_h - 12),
+                    (person_bbox.x1 + p_label_w + 5, person_bbox.y1),
                     (255, 0, 0),
                     -1
                 )
@@ -339,29 +443,75 @@ class DetectionService:
                 cv2.putText(
                     annotated,
                     person_label,
-                    (person_bbox.x1, person_bbox.y1 - 5),
+                    (person_bbox.x1 + 2, person_bbox.y1 - 6),
                     cv2.FONT_HERSHEY_SIMPLEX,
-                    0.5,
+                    0.7,
                     (255, 255, 255),
-                    1
+                    2
                 )
+
+            # If hogged, draw the hogging objects bounding boxes
+            if seat.is_hogged and seat.hogging_objects:
+                for obj in seat.hogging_objects:
+                    obj_bbox = obj.bbox
+
+                    # Draw object bounding box in purple
+                    cv2.rectangle(
+                        annotated,
+                        (obj_bbox.x1, obj_bbox.y1),
+                        (obj_bbox.x2, obj_bbox.y2),
+                        (255, 0, 255),  # Purple for objects
+                        2
+                    )
+
+                    # Draw object label
+                    obj_label = f"{obj.class_name}: {obj.confidence:.2f}"
+                    (o_label_w, o_label_h), _ = cv2.getTextSize(
+                        obj_label,
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.7,
+                        2
+                    )
+
+                    # Background for object label
+                    cv2.rectangle(
+                        annotated,
+                        (obj_bbox.x1, obj_bbox.y1 - o_label_h - 12),
+                        (obj_bbox.x1 + o_label_w + 5, obj_bbox.y1),
+                        (255, 0, 255),
+                        -1
+                    )
+
+                    # Object label text
+                    cv2.putText(
+                        annotated,
+                        obj_label,
+                        (obj_bbox.x1 + 2, obj_bbox.y1 - 6),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.7,
+                        (255, 255, 255),
+                        2
+                    )
 
         return annotated
     
-    def calculate_occupancy(self, seats: List[Seat]) -> Tuple[int, int, float]:
+    def calculate_occupancy(self, seats: List[Seat]) -> Tuple[int, int, int, float]:
         """
-        Calculate seat occupancy based on detected seats
+        Calculate seat occupancy based on detected seats, including hogged seats
 
         Args:
-            seats: List of Seat objects with occupancy information
+            seats: List of Seat objects with occupancy and hogging information
 
         Returns:
-            Tuple of (occupied_seats, available_seats, occupancy_rate)
+            Tuple of (occupied_seats, hogged_seats, available_seats, occupancy_rate)
         """
         total_seats = len(seats)  # Dynamically detected seats
         occupied_seats = len([s for s in seats if s.is_occupied])
-        available_seats = total_seats - occupied_seats
-        occupancy_rate = (occupied_seats / total_seats * 100) if total_seats > 0 else 0.0
+        hogged_seats = len([s for s in seats if s.is_hogged])
+        available_seats = total_seats - occupied_seats - hogged_seats
 
-        logger.info(f"Occupancy: {occupied_seats}/{total_seats} seats occupied ({occupancy_rate:.1f}%)")
-        return occupied_seats, available_seats, occupancy_rate
+        # Occupancy rate includes both person-occupied and object-hogged seats
+        occupancy_rate = ((occupied_seats + hogged_seats) / total_seats * 100) if total_seats > 0 else 0.0
+
+        logger.info(f"Occupancy: {occupied_seats} occupied, {hogged_seats} hogged, {available_seats} available out of {total_seats} total ({occupancy_rate:.1f}%)")
+        return occupied_seats, hogged_seats, available_seats, occupancy_rate
