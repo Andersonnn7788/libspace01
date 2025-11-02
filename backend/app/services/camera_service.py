@@ -192,7 +192,7 @@ class CameraService:
         """Background thread for pre-encoding frames to reduce streaming latency"""
         # Optimized JPEG encoding parameters for Raspberry Pi
         encode_params = [
-            cv2.IMWRITE_JPEG_QUALITY, 70,
+            cv2.IMWRITE_JPEG_QUALITY, 60,
             cv2.IMWRITE_JPEG_OPTIMIZE, 1,  # Enable optimization
             cv2.IMWRITE_JPEG_PROGRESSIVE, 0  # Disable progressive for speed
         ]
